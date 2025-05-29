@@ -3,7 +3,10 @@
 // Documentation references:
 // - Moving averages: https://www.tradingview.com/pine-script-docs/en/v5/concepts/Moving_Averages.html
 // - Strategy functions: https://www.tradingview.com/pine-script-docs/en/v5/essential/Strategy.html
-strategy("ZLHMA-WAE Crypto Trend Breakout", overlay=true, pyramiding=input.int(0, "Pyramiding", minval=0, maxval=1), commission_type=strategy.commission.percent, commission_value=0.04)
+// Pyramiding must be a constant, so capture the input first
+pyramiding_inp = input.int(0, "Pyramiding", minval=0, maxval=1)
+strategy("ZLHMA-WAE Crypto Trend Breakout", overlay=true, pyramiding=pyramiding_inp,
+         commission_type=strategy.commission.percent, commission_value=0.04)
 
 // === Inputs ===
 len_zlhma = input.int(60, "ZLHMA Length", minval=30, maxval=120)
@@ -30,9 +33,6 @@ f_zlhma(src, len) =>
     raw  = 2 * wma1 - wma2
     ta.wma(raw, sqrtl)
 
-// Waddah Attar Explosion - example MACD breakout
-// see https://www.tradingview.com/pine-script-docs/en/v5/concepts/MACD.html
-=======
 // Waddah Attar Explosion
 f_wae(src, fast, slow, mult) =>
     macd = ta.ema(src, fast) - ta.ema(src, slow)
@@ -40,14 +40,12 @@ f_wae(src, fast, slow, mult) =>
     bbDn = ta.sma(macd, slow) - mult * ta.stdev(macd, slow)
     [macd, bbUp]
 
-// Choppiness Index - see https://www.tradingview.com/pine-script-docs/en/v5/essentials/Indicators.html
+// Choppiness Index - measures market congestion
+// https://www.tradingview.com/pine-script-docs/en/v5/essentials/Indicators.html
 f_chop() =>
-    tr_sum = ta.sum(ta.tr(true), 14)
-    range = ta.highest(high, 14) - ta.lowest(low, 14)
-    100 * math.log10(tr_sum / range) / math.log10(14)
-=======
-// Choppiness Index
-f_chop() => 100 * math.log10( ta.sum(ta.tr,14) / ( ta.highest(high,14) - ta.lowest(low,14) ) ) / math.log10(14)
+    tr_sum = ta.sum(ta.tr, 14)
+    rng = ta.highest(high, 14) - ta.lowest(low, 14)
+    100 * math.log10(tr_sum / rng) / math.log10(14)
 
 // === Indicators ===
 zlhma_ltf = f_zlhma(close, len_zlhma)
@@ -57,8 +55,6 @@ atr = ta.atr(14)
 atr_pct = atr / close * 100
 chop = f_chop()
 
-// Funding rates may not be available on all symbols; default to zero
-=======
 funding_rate = request.security(syminfo.tickerid, "1h", nz(fundingrate, 0.0))
 funding_cum  = ta.sum(funding_rate, 8)
 funding_ok   = not use_funding or funding_cum <= fund_thresh
@@ -101,8 +97,6 @@ if strategy.position_size > 0
     stop_init = entry - 2 * atr
     trail_stop = zlhma_ltf - atr
     stop = close - entry >= atr ? math.max(stop_init, trail_stop) : stop_init
-=======
-    stop = math.max(stop_init, trail_stop) if close - entry >= atr else stop_init
     tp = entry + 3 * (entry - stop_init)
     strategy.exit("L-Trail", from_entry="Long", stop=stop, limit=use_tp ? tp : na)
     // Emergency exit
@@ -117,8 +111,6 @@ if strategy.position_size < 0
     stop_init = entry + 2 * atr
     trail_stop = zlhma_ltf + atr
     stop = entry - close >= atr ? math.min(stop_init, trail_stop) : stop_init
-=======
-    stop = math.min(stop_init, trail_stop) if entry - close >= atr else stop_init
     tp = entry - 3 * (stop_init - entry)
     strategy.exit("S-Trail", from_entry="Short", stop=stop, limit=use_tp ? tp : na)
     // Emergency exit
@@ -127,4 +119,3 @@ if strategy.position_size < 0
     // Time exit
     if entry_bar != na and (bar_index - entry_bar) >= 168
         strategy.close("Short")
-
