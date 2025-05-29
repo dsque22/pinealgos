@@ -19,3 +19,13 @@ The resulting `dataset.jsonl` will contain one JSON object per line with the fol
 
 Use this dataset as input for model training pipelines.
 
+
+## Pine Script development
+
+Use this repository to experiment with Pine Script examples. When adding new scripts:
+
+- Refer to the official [TradingView documentation](https://www.tradingview.com/pine-script-docs/) for language details.
+- Put each example in its own file or folder with a clear, descriptive name.
+- Comment your code with links or references to the relevant documentation sections.
+- Keep examples short and educational, and include a small README explaining what each script demonstrates.
+
