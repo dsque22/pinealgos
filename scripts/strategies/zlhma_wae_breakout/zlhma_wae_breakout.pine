@@ -1,0 +1,115 @@
+//@version=5
+// ZLHMA-WAE Crypto Trend Breakout strategy
+// Documentation references:
+// - Moving averages: https://www.tradingview.com/pine-script-docs/en/v5/concepts/Moving_Averages.html
+// - Strategy functions: https://www.tradingview.com/pine-script-docs/en/v5/essential/Strategy.html
+strategy("ZLHMA-WAE Crypto Trend Breakout", overlay=true, pyramiding=input.int(0, "Pyramiding", minval=0, maxval=1), commission_type=strategy.commission.percent, commission_value=0.04)
+
+// === Inputs ===
+len_zlhma = input.int(60, "ZLHMA Length", minval=30, maxval=120)
+fast_ema  = input.int(20, "WAE Fast EMA")
+slow_ema  = input.int(40, "WAE Slow EMA")
+mult_expl = input.float(1.8, "Explosion Mult", minval=1.4, maxval=2.5)
+atr_low   = input.float(1.0, "ATR Low %")
+atr_high  = input.float(10.0, "ATR High %")
+chop_max  = input.float(38.0, "Choppiness Max", minval=32, maxval=45)
+fund_thresh = input.float(0.05, "Funding Threshold %")
+use_funding = input.bool(false, "Use Funding Filter")
+use_tp    = input.bool(true, "Use 3R Take Profit")
+tf_htf    = input.timeframe("240", "HTF timeframe")
+risk_long = input.float(1.0, "Risk Long %", minval=0.1)
+risk_short= input.float(0.7, "Risk Short %", minval=0.1)
+
+// === Helper functions ===
+// Zero-Lag Hull MA
+f_zlhma(src, len) =>
+    half = len / 2
+    sqrtl = math.sqrt(len)
+    wma1 = ta.wma(src, half)
+    wma2 = ta.wma(src, len)
+    raw  = 2 * wma1 - wma2
+    ta.wma(raw, sqrtl)
+
+// Waddah Attar Explosion
+f_wae(src, fast, slow, mult) =>
+    macd = ta.ema(src, fast) - ta.ema(src, slow)
+    bbUp = ta.sma(macd, slow) + mult * ta.stdev(macd, slow)
+    bbDn = ta.sma(macd, slow) - mult * ta.stdev(macd, slow)
+    [macd, bbUp]
+
+// Choppiness Index
+f_chop() => 100 * math.log10( ta.sum(ta.tr,14) / ( ta.highest(high,14) - ta.lowest(low,14) ) ) / math.log10(14)
+
+// === Indicators ===
+zlhma_ltf = f_zlhma(close, len_zlhma)
+zlhma_htf = request.security(syminfo.tickerid, tf_htf, f_zlhma(close, len_zlhma))
+[wae_hist, wae_expl] = f_wae(close, fast_ema, slow_ema, mult_expl)
+atr = ta.atr(14)
+atr_pct = atr / close * 100
+chop = f_chop()
+
+funding_rate = request.security(syminfo.tickerid, "1h", nz(fundingrate, 0.0))
+funding_cum  = ta.sum(funding_rate, 8)
+funding_ok   = not use_funding or funding_cum <= fund_thresh
+
+// === Entry Conditions ===
+htf_bias_long  = ta.change(zlhma_htf) > 0 and close > zlhma_htf
+htf_bias_short = ta.change(zlhma_htf) < 0 and close < zlhma_htf
+ltf_trend_long  = close > zlhma_ltf
+ltf_trend_short = close < zlhma_ltf
+momentum_long  = ta.crossover(wae_hist, wae_expl)
+momentum_short = ta.crossunder(wae_hist, -wae_expl)
+atr_ok = atr_pct >= atr_low and atr_pct <= atr_high
+noise_ok = chop < chop_max
+
+long_cond  = htf_bias_long and ltf_trend_long and momentum_long and atr_ok and noise_ok and funding_ok
+short_cond = htf_bias_short and ltf_trend_short and momentum_short and atr_ok and noise_ok and funding_ok
+
+// === Position sizing ===
+var float entry_bar = na
+
+if (long_cond and strategy.position_size <= 0)
+    stop_price = close - 2 * atr
+    risk_amt = strategy.equity * risk_long / 100
+    qty = risk_amt / (close - stop_price)
+    strategy.entry("Long", strategy.long, qty)
+    strategy.exit("Long Exit", "Long", stop=stop_price)
+    entry_bar := bar_index
+
+if (short_cond and strategy.position_size >= 0)
+    stop_price = close + 2 * atr
+    risk_amt = strategy.equity * risk_short / 100
+    qty = risk_amt / (stop_price - close)
+    strategy.entry("Short", strategy.short, qty)
+    strategy.exit("Short Exit", "Short", stop=stop_price)
+    entry_bar := bar_index
+
+// === Trailing stop and TP ===
+if strategy.position_size > 0
+    entry = strategy.position_avg_price
+    stop_init = entry - 2 * atr
+    trail_stop = zlhma_ltf - atr
+    stop = math.max(stop_init, trail_stop) if close - entry >= atr else stop_init
+    tp = entry + 3 * (entry - stop_init)
+    strategy.exit("L-Trail", from_entry="Long", stop=stop, limit=use_tp ? tp : na)
+    // Emergency exit
+    if ta.crossunder(wae_hist, -wae_expl) and close < zlhma_ltf
+        strategy.close("Long")
+    // Time exit
+    if entry_bar != na and (bar_index - entry_bar) >= 168
+        strategy.close("Long")
+
+if strategy.position_size < 0
+    entry = strategy.position_avg_price
+    stop_init = entry + 2 * atr
+    trail_stop = zlhma_ltf + atr
+    stop = math.min(stop_init, trail_stop) if entry - close >= atr else stop_init
+    tp = entry - 3 * (stop_init - entry)
+    strategy.exit("S-Trail", from_entry="Short", stop=stop, limit=use_tp ? tp : na)
+    // Emergency exit
+    if ta.crossover(wae_hist, wae_expl) and close > zlhma_ltf
+        strategy.close("Short")
+    // Time exit
+    if entry_bar != na and (bar_index - entry_bar) >= 168
+        strategy.close("Short")
+
